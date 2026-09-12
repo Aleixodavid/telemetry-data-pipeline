@@ -1,87 +1,35 @@
-# 📋 Clipboard Integration Service
+# Telemetry Data Pipeline
 
-> **Microsserviço de Integração de Área de Transferência & Sanitização de Dados Sensíveis**  
-> Componente reativo para monitoramento da área de transferência, notificação orientada a eventos e proteção contra vazamento de credenciais.
+An asynchronous Extract, Transform, Load (ETL) pipeline designed for asset telemetry ingestion, data normalization, and analytical reporting.
 
----
+## Overview
 
-## 🎯 Objetivo do Subprograma
+The Telemetry Data Pipeline receives sensor metrics (CPU usage, memory, temperature, network latency, disk I/O) from remote nodes, validates incoming JSON payloads against strict schemas, normalizes data, and persists events in an optimized SQLite database.
 
-O **Clipboard Integration Service** gerencia a interatividade com a área de transferência do sistema em ambientes corporativos e de automação. Seu foco principal é aplicar um **motor automatizado de redação e sanitização de dados sensíveis** antes que conteúdos copiados sejam armazenados, persistidos ou transmitidos para APIs externas.
+## Architecture
 
----
+### ETL Engine (`etl_engine.py`)
+- **Extract**: Ingests individual metric events or bulk batches via REST endpoints.
+- **Transform**: Sanitizes inputs, normalizes units, applies UNIX timestamps, and enriches data with tags.
+- **Load**: Persists structured metrics into SQLite.
 
-## 🏛️ Arquitetura & Padrões de Projeto (*Design Patterns*)
+### Schema Validator (`schema_validator.py`)
+Enforces field presence (`source`, `event_type`, `metric_value`), domain constraints, and numeric range limits.
 
-### 1. **Observer Pattern (ClipboardSubject & ClipboardObserver)**
-- **Arquivos:** `observer_event.py` / `clipboard_manager.py`
-- **Funcionamento:** Quando o conteúdo da área de transferência é alterado, o gerenciador (*Subject*) dispara notificações automáticas para todos os observadores cadastrados (*Observers*):
-  - `AuditLogObserver`: Registra logs de auditoria detalhados com contagem de caracteres e flags de segurança.
-  - `AutoSanitizerObserver`: Aciona preventivamente o motor de sanitização de dados.
+### Database Layer (`db_manager.py`)
+Configured with SQLite **Write-Ahead Logging (WAL) mode** (`PRAGMA journal_mode=WAL`), optimistic locking, and composite indexes on `(source, event_type)` and `(event_timestamp DESC)` to deliver query latencies under 150ms.
 
-### 2. **Motor Sanitizador por Expressão Regular (Data Sanitizer Engine)**
-- **Arquivo:** `sanitizer.py`
-- **Padrões Detectados & Substituídos:**
-  - **Tokens & API Keys:** Substituídos por `"TEST_TOKEN_API_KEY_001"`.
-  - **Cartões de Crédito (16 dígitos):** Redigidos para `[REDACTED_CREDIT_CARD]`.
-  - **CPFs Pessoais (`xxx.xxx.xxx-xx`):** Mascarados para `000.000.000-00`.
-  - **Endereços de E-mail:** Substituídos por `user@example.com`.
-  - **Tokens JWT (`eyJ...`):** Substituídos por `TEST_TOKEN_JWT_PLACEHOLDER`.
+## API Endpoints
 
-### 3. **Gerenciador de Estado Thread-Safe**
-- **Arquivo:** `clipboard_manager.py`
-- **Funcionamento:** Utiliza trava de exclusão mútua (`threading.Lock`) para garantir a integridade do histórico de transferências em aplicações concorrentes de alta frequência.
+- `POST /api/ingest` — Ingest a single telemetry event.
+- `POST /api/ingest/batch` — Ingest a bulk array of metric events.
+- `POST /api/generate-sample` — Populate synthetic metric load (50–1000 events) for testing.
+- `GET /api/reports/summary` — Consolidated metric summary (counts, averages, min/max).
+- `GET /api/reports/by-source` — Metrics aggregated by source node.
+- `GET /api/reports/by-period?granularity=hour` — Time-series aggregation by hour or day.
 
----
-
-## 🔒 Sanitização & Segurança
-
-- **Proteção Ativa:** Impede o vazamento inadvertido de chaves privadas, senhas ou dados pessoais (LGPD/GDPR) via clipboard.
-- **Configuração Sanitizada:** Contém identificadores fictícios de demonstração (`TEST_TOKEN_API_KEY_001`, `TEST_CLIENT_SAMPLE_ID`).
-- **Autenticação de Acesso:** Protegida por HTTP Basic Auth (`admin` / `admin`).
-
----
-
-## 📡 Endpoints da API (Porta `5004`)
-
-### `GET /api/clipboard`
-Retorna o conteúdo atual armazenado na área de transferência (já sanitizado).
-
-### `POST /api/clipboard`
-Define novo conteúdo na área de transferência. O texto passa pelo filtro sanitizador antes de ser registrado no histórico e notificado aos observadores.
-- **Body Exemplo:**
-  ```json
-  {
-    "content": "Secret Token: api_key = 'sk_live_9988776655443322'",
-    "source": "user_copy"
-  }
-  ```
-- **Resposta Exemplo:**
-  ```json
-  {
-    "content": "Secret Token: api_key: \"TEST_TOKEN_API_KEY_001\"",
-    "replacements": 1,
-    "sanitized": true,
-    "status": "success"
-  }
-  ```
-
-### `GET /api/clipboard/history`
-Retorna a lista das últimas entradas registradas na área de transferência.
-
-### `POST /api/clipboard/clear`
-Limpa imediatamente o conteúdo atual e apaga o histórico de transferências.
-
-### `POST /api/sanitize`
-Permite testar o motor sanitizador com um texto arbitrário sem modificar a área de transferência.
-
----
-
-## 🧪 Testes Unitários
-
-Para executar os testes do Serviço de Clipboard:
+## Running Tests
 
 ```bash
-cd D:\Pessoal\portifolio\clipboard_integration_service
 python -m pytest tests/ -v
 ```
